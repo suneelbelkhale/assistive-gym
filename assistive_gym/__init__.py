@@ -203,6 +203,13 @@ register(
     max_episode_steps=200,
 )
 
+# Feeding Panda
+register(
+    id='FeedingPanda-v0',
+    entry_point='assistive_gym.envs:FeedingPandaEnv',
+    max_episode_steps=200,
+)
+
 # Feeding PR2 Human
 register(
     id='FeedingPR2Human-v0',
@@ -340,6 +347,13 @@ register(
 register(
     id='ArmManipulationJacoHuman-v0',
     entry_point='assistive_gym.envs:ArmManipulationJacoHumanEnv',
+    max_episode_steps=200,
+)
+
+# Bite transfer panda
+register(
+    id='BiteTransferPanda-v0',
+    entry_point='assistive_gym.envs:BiteTransferPandaEnv',
     max_episode_steps=200,
 )
 

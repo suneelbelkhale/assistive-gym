@@ -5,34 +5,35 @@ import pybullet as p
 
 from .env import AssistiveEnv
 
-class FeedingEnv(AssistiveEnv):
-    def __init__(self, robot_type='pr2', human_control=False):
-        super(FeedingEnv, self).__init__(robot_type=robot_type, task='feeding', human_control=human_control, frame_skip=10, time_step=0.01, action_robot_len=7, action_human_len=(4 if human_control else 0), obs_robot_len=25, obs_human_len=(23 if human_control else 0))
+class BiteTransferEnv(AssistiveEnv):
+    def __init__(self, robot_type='panda', human_control=False):
+        super(BiteTransferEnv, self).__init__(robot_type=robot_type, task='bite_transfer', human_control=human_control, frame_skip=10, time_step=0.01, action_robot_len=7, action_human_len=(4 if human_control else 0), obs_robot_len=25, obs_human_len=(23 if human_control else 0))
 
+    # TODO
     def step(self, action):
         self.take_step(action, robot_arm='right', gains=self.config('robot_gains'), forces=self.config('robot_forces'), human_gains=0.0005)
 
         robot_force_on_human, spoon_force_on_human = self.get_total_force()
-        total_force_on_human = robot_force_on_human + spoon_force_on_human
-        reward_food, food_mouth_velocities, food_hit_human_reward = self.get_food_rewards()
-        end_effector_velocity = np.linalg.norm(p.getBaseVelocity(self.spoon, physicsClientId=self.id)[0])
+        # total_force_on_human = robot_force_on_human + spoon_force_on_human
+        # reward_food, food_mouth_velocities, food_hit_human_reward = self.get_food_rewards()
+        end_effector_velocity = np.linalg.norm(p.getBaseVelocity(self.drop_fork, physicsClientId=self.id)[0])
         obs = self._get_obs([spoon_force_on_human], [robot_force_on_human, spoon_force_on_human])
 
         # Get human preferences
-        preferences_score = self.human_preferences(end_effector_velocity=end_effector_velocity, total_force_on_human=robot_force_on_human, tool_force_at_target=spoon_force_on_human, food_hit_human_reward=food_hit_human_reward, food_mouth_velocities=food_mouth_velocities)
+        # preferences_score = self.human_preferences(end_effector_velocity=end_effector_velocity, total_force_on_human=robot_force_on_human, tool_force_at_target=spoon_force_on_human, food_hit_human_reward=food_hit_human_reward, food_mouth_velocities=food_mouth_velocities)
 
-        spoon_pos, spoon_orient = p.getBasePositionAndOrientation(self.spoon, physicsClientId=self.id)
+        spoon_pos, spoon_orient = p.getBasePositionAndOrientation(self.drop_fork, physicsClientId=self.id)
         spoon_pos = np.array(spoon_pos)
 
         reward_distance_mouth_target = -np.linalg.norm(self.target_pos - spoon_pos) # Penalize robot for distance between the spoon and human mouth.
         reward_action = -np.sum(np.square(action)) # Penalize actions
 
-        reward = self.config('distance_weight')*reward_distance_mouth_target + self.config('action_weight')*reward_action + self.config('food_reward_weight')*reward_food + preferences_score
+        reward = 0
 
-        if self.gui and reward_food != 0:
-            print('Task success:', self.task_success, 'Food reward:', reward_food)
+        if self.gui and reward != 0:
+            print('Task success:', self.task_success, 'Food reward:', reward)
 
-        info = {'total_force_on_human': total_force_on_human, 'task_success': int(self.task_success >= self.total_food_count*self.config('task_success_threshold')), 'action_robot_len': self.action_robot_len, 'action_human_len': self.action_human_len, 'obs_robot_len': self.obs_robot_len, 'obs_human_len': self.obs_human_len}
+        info = {'total_force_on_human': 0, 'task_success': 0, 'action_robot_len': self.action_robot_len, 'action_human_len': self.action_human_len, 'obs_robot_len': self.obs_robot_len, 'obs_human_len': self.obs_human_len}
         done = False
 
         return obs, reward, done, info
@@ -42,7 +43,7 @@ class FeedingEnv(AssistiveEnv):
         spoon_force_on_human = 0
         for c in p.getContactPoints(bodyA=self.robot, bodyB=self.human, physicsClientId=self.id):
             robot_force_on_human += c[9]
-        for c in p.getContactPoints(bodyA=self.spoon, bodyB=self.human, physicsClientId=self.id):
+        for c in p.getContactPoints(bodyA=self.drop_fork, bodyB=self.human, physicsClientId=self.id):
             spoon_force_on_human += c[9]
         return robot_force_on_human, spoon_force_on_human
 
@@ -79,7 +80,7 @@ class FeedingEnv(AssistiveEnv):
 
     def _get_obs(self, forces, forces_human):
         torso_pos = np.array(p.getLinkState(self.robot, 15 if self.robot_type == 'pr2' else 0, computeForwardKinematics=True, physicsClientId=self.id)[0])
-        spoon_pos, spoon_orient = p.getBasePositionAndOrientation(self.spoon, physicsClientId=self.id)
+        spoon_pos, spoon_orient = p.getBasePositionAndOrientation(self.drop_fork, physicsClientId=self.id)
         robot_right_joint_states = p.getJointStates(self.robot, jointIndices=self.robot_right_arm_joint_indices, physicsClientId=self.id)
         robot_right_joint_positions = np.array([x[0] for x in robot_right_joint_states])
         robot_pos, robot_orient = p.getBasePositionAndOrientation(self.robot, physicsClientId=self.id)
@@ -135,7 +136,7 @@ class FeedingEnv(AssistiveEnv):
         wrist_pos, wrist_orient = p.getLinkState(self.human, 9, computeForwardKinematics=True, physicsClientId=self.id)[:2]
         head_pos, head_orient = p.getLinkState(self.human, 23, computeForwardKinematics=True, physicsClientId=self.id)[:2]
 
-        # Set target on mouth
+        # Set target on mouth TODO make robotic mouth
         self.mouth_pos = [0, -0.11, 0.03] if self.gender == 'male' else [0, -0.1, 0.03]
         head_pos, head_orient = p.getLinkState(self.human, 23, computeForwardKinematics=True, physicsClientId=self.id)[:2]
         target_pos, target_orient = p.multiplyTransforms(head_pos, head_orient, self.mouth_pos, [0, 0, 0, 1], physicsClientId=self.id)
@@ -144,20 +145,13 @@ class FeedingEnv(AssistiveEnv):
         sphere_visual = p.createVisualShape(shapeType=p.GEOM_SPHERE, radius=0.01, rgbaColor=[0, 1, 0, 1], physicsClientId=self.id)
         self.target = p.createMultiBody(baseMass=0.0, baseCollisionShapeIndex=sphere_collision, baseVisualShapeIndex=sphere_visual, basePosition=self.target_pos, useMaximalCoordinates=False, physicsClientId=self.id)
 
+        robot = p.loadURDF(os.path.join(self.world_creation.directory, 'mouth', 'hole.urdf'), useFixedBase=True, basePosition=[-0.15, -0.1, 1.3], baseOrientation=p.getQuaternionFromEuler([np.pi/2, np.pi/2, 0]), flags=p.URDF_USE_SELF_COLLISION, physicsClientId=self.id)
+
         p.resetDebugVisualizerCamera(cameraDistance=1.10, cameraYaw=40, cameraPitch=-45, cameraTargetPosition=[-0.2, 0, 0.75], physicsClientId=self.id)
 
+        # ROBOT STUFF
         target_pos = np.array(bowl_pos) + np.array([0, -0.1, 0.4]) + self.np_random.uniform(-0.05, 0.05, size=3)
-        if self.robot_type == 'pr2':
-            target_orient = p.getQuaternionFromEuler([np.pi/2.0, 0, 0], physicsClientId=self.id)
-            self.position_robot_toc(self.robot, 54, [(target_pos, target_orient), (self.target_pos, None)], [(self.target_pos, target_orient)], self.robot_right_arm_joint_indices, self.robot_lower_limits, self.robot_upper_limits, ik_indices=range(15, 15+7), pos_offset=np.array([0.1, 0.2, 0]), max_ik_iterations=200, step_sim=True, check_env_collisions=False, human_joint_indices=self.human_controllable_joint_indices, human_joint_positions=self.target_human_joint_positions)
-            self.world_creation.set_gripper_open_position(self.robot, position=0.03, left=False, set_instantly=True)
-            self.spoon = self.world_creation.init_tool(self.robot, mesh_scale=[0.08]*3, pos_offset=[0, -0.03, -0.11], orient_offset=p.getQuaternionFromEuler([-0.2, 0, 0], physicsClientId=self.id), left=False, maximal=False)
-        elif self.robot_type == 'jaco':
-            target_orient = p.getQuaternionFromEuler(np.array([np.pi/2.0, 0, np.pi/2.0]), physicsClientId=self.id)
-            self.util.ik_random_restarts(self.robot, 8, target_pos, target_orient, self.world_creation, self.robot_right_arm_joint_indices, self.robot_lower_limits, self.robot_upper_limits, ik_indices=[0, 1, 2, 3, 4, 5, 6], max_iterations=1000, max_ik_random_restarts=40, random_restart_threshold=0.01, step_sim=True, check_env_collisions=True)
-            self.world_creation.set_gripper_open_position(self.robot, position=1.33, left=False, set_instantly=True)
-            self.spoon = self.world_creation.init_tool(self.robot, mesh_scale=[0.08]*3, pos_offset=[0.1, -0.0225, 0.03], orient_offset=p.getQuaternionFromEuler([-0.1, -np.pi/2.0, 0], physicsClientId=self.id), left=False, maximal=False)
-        elif self.robot_type == 'panda':
+        if self.robot_type == 'panda':
             target_orient = p.getQuaternionFromEuler(np.array([np.pi / 2.0, 0, np.pi / 2.0]), physicsClientId=self.id)
             self.util.ik_random_restarts(self.robot, 8, target_pos, target_orient, self.world_creation,
                                          self.robot_right_arm_joint_indices, self.robot_lower_limits,
@@ -165,52 +159,65 @@ class FeedingEnv(AssistiveEnv):
                                          max_ik_random_restarts=40, random_restart_threshold=0.01, step_sim=True,
                                          check_env_collisions=True)
             self.world_creation.set_gripper_open_position(self.robot, position=0.00, left=False, set_instantly=True)
-            self.spoon = self.world_creation.init_tool(self.robot, mesh_scale=[0.08] * 3,
+            self.drop_fork = self.world_creation.init_tool(self.robot, mesh_scale=[0.08] * 3,
                                                        pos_offset=[0, 0, 0.08],  # fork: [0, -0.02, 0.16],
                                                        orient_offset=p.getQuaternionFromEuler([-0.1, -np.pi, 0],
                                                                                               physicsClientId=self.id),
                                                        left=False, maximal=False)
         else:
-            target_orient = p.getQuaternionFromEuler(np.array([np.pi/2.0, 0, np.pi/2.0]), physicsClientId=self.id)
-            if self.robot_type == 'baxter':
-                self.position_robot_toc(self.robot, 26, [(target_pos, target_orient)], [(self.target_pos, target_orient)], self.robot_right_arm_joint_indices, self.robot_lower_limits, self.robot_upper_limits, ik_indices=range(1, 8), pos_offset=np.array([0, 0.2, 0.975]), max_ik_iterations=200, step_sim=True, check_env_collisions=False, human_joint_indices=self.human_controllable_joint_indices, human_joint_positions=self.target_human_joint_positions)
-            else:
-                self.position_robot_toc(self.robot, 19, [(target_pos, target_orient), (self.target_pos, None)], [(self.target_pos, target_orient)], self.robot_right_arm_joint_indices, self.robot_lower_limits, self.robot_upper_limits, ik_indices=[0, 2, 3, 4, 5, 6, 7], pos_offset=np.array([-0.1, 0.2, 0.975]), max_ik_iterations=200, step_sim=True, check_env_collisions=False, human_joint_indices=self.human_controllable_joint_indices, human_joint_positions=self.target_human_joint_positions)
-            self.world_creation.set_gripper_open_position(self.robot, position=0.0, left=False, set_instantly=True)
-            self.spoon = self.world_creation.init_tool(self.robot, mesh_scale=[0.08]*3, pos_offset=[-0.1, 0.12, -0.02], orient_offset=p.getQuaternionFromEuler([np.pi/2.0-0.1, 0, np.pi/2.0], physicsClientId=self.id), left=False, maximal=False)
+            raise NotImplementedError
 
-        p.resetBasePositionAndOrientation(self.bowl, bowl_pos, p.getQuaternionFromEuler([np.pi/2.0, 0, 0], physicsClientId=self.id), physicsClientId=self.id)
+        # LOAD FOOD ITEM
+        self.foodItem = p.loadURDF(os.path.join(self.world_creation.directory, 'food_items', 'strawberry.urdf'), basePosition=[0, 0, 0],
+                          baseOrientation=p.getQuaternionFromEuler([0, 0, 0],
+                                                                   physicsClientId=self.id),
+                          physicsClientId=self.id)
+
+        # Disable collisions between the tool and foot item
+        for ti in list(range(p.getNumJoints(self.drop_fork, physicsClientId=self.id))) + [-1]:
+            for tj in list(range(p.getNumJoints(self.foodItem, physicsClientId=self.id))) + [-1]:
+                p.setCollisionFilterPair(self.drop_fork, self.foodItem, ti, tj, False, physicsClientId=self.id)
+        # Create constraint that keeps the food item in the tool
+        constraint = p.createConstraint(self.drop_fork, -1,
+                                        self.foodItem, -1, p.JOINT_FIXED, [0, 0, 0], parentFramePosition=[0, 0, 0],
+                                        childFramePosition=[0, 0, -0.026],
+                                        parentFrameOrientation=p.getQuaternionFromEuler([0, np.pi, 0], physicsClientId=self.id),
+                                        physicsClientId=self.id)
+        p.changeConstraint(constraint, maxForce=500, physicsClientId=self.id)
+
+
+        # p.resetBasePositionAndOrientation(self.bowl, bowl_pos, p.getQuaternionFromEuler([np.pi/2.0, 0, 0], physicsClientId=self.id), physicsClientId=self.id)
 
         p.setGravity(0, 0, -9.81, physicsClientId=self.id)
         p.setGravity(0, 0, 0, body=self.robot, physicsClientId=self.id)
         p.setGravity(0, 0, 0, body=self.human, physicsClientId=self.id)
 
         p.setPhysicsEngineParameter(numSubSteps=5, numSolverIterations=10, physicsClientId=self.id)
-
-        # Generate food
-        spoon_pos, spoon_orient = p.getBasePositionAndOrientation(self.spoon, physicsClientId=self.id)
-        spoon_pos = np.array(spoon_pos)
-        food_radius = 0.005
-        food_collision = p.createCollisionShape(p.GEOM_SPHERE, radius=food_radius, physicsClientId=self.id)
-        food_visual = -1
-        food_mass = 0.001
-        food_count = 2*2*2
-        batch_positions = []
-        for i in range(2):
-            for j in range(2):
-                for k in range(2):
-                    batch_positions.append(np.array([i*2*food_radius-0.005, j*2*food_radius, k*2*food_radius+0.02]) + spoon_pos)
-        last_food_id = p.createMultiBody(baseMass=food_mass, baseCollisionShapeIndex=food_collision, baseVisualShapeIndex=food_visual, basePosition=[0, 0, 0], useMaximalCoordinates=False, batchPositions=batch_positions, physicsClientId=self.id)
-        self.foods = list(range(last_food_id-food_count+1, last_food_id+1))
-        self.foods_hit_person = []
-        self.total_food_count = len(self.foods)
+        #
+        # # Generate food
+        # spoon_pos, spoon_orient = p.getBasePositionAndOrientation(self.spoon, physicsClientId=self.id)
+        # spoon_pos = np.array(spoon_pos)
+        # food_radius = 0.005
+        # food_collision = p.createCollisionShape(p.GEOM_SPHERE, radius=food_radius, physicsClientId=self.id)
+        # food_visual = -1
+        # food_mass = 0.001
+        # food_count = 2*2*2
+        # batch_positions = []
+        # for i in range(2):
+        #     for j in range(2):
+        #         for k in range(2):
+        #             batch_positions.append(np.array([i*2*food_radius-0.005, j*2*food_radius, k*2*food_radius+0.02]) + spoon_pos)
+        # last_food_id = p.createMultiBody(baseMass=food_mass, baseCollisionShapeIndex=food_collision, baseVisualShapeIndex=food_visual, basePosition=[0, 0, 0], useMaximalCoordinates=False, batchPositions=batch_positions, physicsClientId=self.id)
+        # self.foods = list(range(last_food_id-food_count+1, last_food_id+1))
+        # self.foods_hit_person = []
+        # self.total_food_count = len(self.foods)
 
         # Enable rendering
         p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1, physicsClientId=self.id)
 
         # Drop food in the spoon
-        for _ in range(100):
-            p.stepSimulation(physicsClientId=self.id)
+        # for _ in range(100):
+        #     p.stepSimulation(physicsClientId=self.id)
 
         return self._get_obs([0], [0, 0])
 

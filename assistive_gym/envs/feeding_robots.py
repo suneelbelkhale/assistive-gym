@@ -16,6 +16,10 @@ class FeedingJacoEnv(FeedingEnv):
     def __init__(self):
         super(FeedingJacoEnv, self).__init__(robot_type='jaco', human_control=False)
 
+class FeedingPandaEnv(FeedingEnv):
+    def __init__(self):
+        super(FeedingPandaEnv, self).__init__(robot_type='panda', human_control=False)
+
 class FeedingPR2HumanEnv(FeedingEnv):
     def __init__(self):
         super(FeedingPR2HumanEnv, self).__init__(robot_type='pr2', human_control=True)

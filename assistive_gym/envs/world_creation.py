@@ -1,6 +1,8 @@
 import os
 import numpy as np
 import pybullet as p
+from pybullet_utils import urdfEditor as ed
+
 from .human_creation import HumanCreation
 
 class WorldCreation:
@@ -77,6 +79,8 @@ class WorldCreation:
             robot, robot_lower_limits, robot_upper_limits, robot_right_arm_joint_indices, robot_left_arm_joint_indices = self.init_baxter(print_joints)
         elif self.robot_type == 'jaco':
             robot, robot_lower_limits, robot_upper_limits, robot_right_arm_joint_indices, robot_left_arm_joint_indices = self.init_jaco(print_joints)
+        elif self.robot_type == 'panda':
+            robot, robot_lower_limits, robot_upper_limits, robot_right_arm_joint_indices, robot_left_arm_joint_indices = self.init_panda(print_joints)
         elif self.robot_type == 'kinova_gen3':
             robot, robot_lower_limits, robot_upper_limits, robot_right_arm_joint_indices, robot_left_arm_joint_indices = self.init_kinova_gen3(print_joints)
         else:
@@ -270,6 +274,41 @@ class WorldCreation:
 
         return robot, lower_limits, upper_limits, robot_arm_joint_indices, robot_arm_joint_indices
 
+    def init_panda(self, print_joints=False):
+
+        initial_positions = {
+            'panda_joint1': 0.0, 'panda_joint2': -0.54, 'panda_joint3': 0.0,
+            'panda_joint4': -2.6, 'panda_joint5': -0.30, 'panda_joint6': 2.0,
+            'panda_joint7': 1.0, 'panda_finger_joint1': 0.02, 'panda_finger_joint2': 0.02,
+        }
+
+        # Enable self collisions to prevent the arm from going through the torso
+        if self.task == 'arm_manipulation':
+            raise NotImplementedError
+        else:
+            robot = p.loadURDF(os.path.join(self.directory, 'panda', 'panda_model.urdf'), useFixedBase=True, basePosition=[0, 0, 0], flags=p.URDF_USE_SELF_COLLISION, physicsClientId=self.id)
+        robot_arm_joint_indices = []
+        for i in range(p.getNumJoints(robot, physicsClientId=self.id)):
+            joint_info = p.getJointInfo(robot, i, physicsClientId=self.id)
+            jtype = joint_info[2]
+            jname = joint_info[1].decode('UTF-8')
+            if jtype is p.JOINT_REVOLUTE or jtype is p.JOINT_PRISMATIC:
+                robot_arm_joint_indices.append(i)
+                p.resetJointState(robot, i, initial_positions[jname], physicsClientId=self.id)
+                print("ADDING JOINT %s, %d" % (jname, i))
+        robot_arm_joint_indices = robot_arm_joint_indices[:7]  # last joints are arm
+
+        if print_joints:
+            self.print_joint_info(robot, show_fixed=True)
+
+        # Initialize and position
+        p.resetBasePositionAndOrientation(robot, [-0.3, -0.7, 0.75], [0, 0, 0, 1], physicsClientId=self.id)
+
+        # Grab and enforce robot arm joint limits
+        lower_limits, upper_limits = self.enforce_joint_limits(robot)
+
+        return robot, lower_limits, upper_limits, robot_arm_joint_indices, robot_arm_joint_indices
+
     def init_kinova_gen3(self, print_joints=False):
         robot = p.loadURDF(os.path.join(self.directory, 'kinova_gen3', 'GEN3_URDF_V12.urdf'), useFixedBase=True, basePosition=[0, 0, 0], flags=p.URDF_USE_SELF_COLLISION, physicsClientId=self.id)
         robot_arm_joint_indices = [0, 1, 2, 3, 4, 5, 6]
@@ -297,6 +336,9 @@ class WorldCreation:
         elif self.robot_type == 'jaco':
             indices_new = [9, 11, 13]
             positions = [position, position, position]
+        elif self.robot_type == 'panda':
+            indices_new = [9, 10]
+            positions = [position, position]
         if indices is None:
             indices = indices_new
 
@@ -315,6 +357,8 @@ class WorldCreation:
             tool = p.loadURDF(os.path.join(self.directory, 'scratcher', 'tool_scratch.urdf'), basePosition=transform_pos, baseOrientation=transform_orient, physicsClientId=self.id)
         elif self.task == 'bed_bathing':
             tool = p.loadURDF(os.path.join(self.directory, 'bed_bathing', 'wiper.urdf'), basePosition=transform_pos, baseOrientation=transform_orient, physicsClientId=self.id)
+        elif self.task == 'bite_transfer' and self.robot_type == "panda":
+            tool = p.loadURDF(os.path.join(self.directory, 'dinnerware', 'drop_fork.urdf'), basePosition=transform_pos, baseOrientation=transform_orient, physicsClientId=self.id)
         elif self.task in ['drinking', 'scooping', 'feeding', 'arm_manipulation']:
             if self.task == 'drinking':
                 visual_filename = os.path.join(self.directory, 'dinnerware', 'plastic_coffee_cup.obj')

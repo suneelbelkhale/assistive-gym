@@ -1,0 +1,20 @@
+<robot name="hole.urdf">
+<link name ="base">
+    <visual>
+      <origin xyz='0 0 0' rpy='0 0 0'/>
+      <geometry>
+        <mesh filename="hole.dae"  scale="0.05 0.05 0.05" />
+      </geometry>
+    </visual>
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+	 	<mesh filename="hole_vhacd.obj" scale="0.05 0.05 0.05"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>
