@@ -1,0 +1,23 @@
+<robot name="carrot.urdf">
+<link name ="base">
+    <visual>
+      <origin xyz='0 0 0' rpy='0 0 0'/>
+      <geometry>
+        <mesh filename="carrot.dae"  scale="0.02 0.02 0.02" />
+      </geometry>
+      <material name="orange">
+    	<color rgba="0.8 0.4 0 1."/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="0.002"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+	 	<mesh filename="carrot_vhacd.obj" scale="0.02 0.02 0.02"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

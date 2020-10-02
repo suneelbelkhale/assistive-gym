@@ -276,11 +276,12 @@ class WorldCreation:
 
     def init_panda(self, print_joints=False):
 
-        initial_positions = {
-            'panda_joint1': 0.0, 'panda_joint2': -0.54, 'panda_joint3': 0.0,
-            'panda_joint4': -2.6, 'panda_joint5': -0.30, 'panda_joint6': 2.0,
-            'panda_joint7': 1.0, 'panda_finger_joint1': 0.02, 'panda_finger_joint2': 0.02,
-        }
+        # initial_positions = {
+        #     'panda_joint1': 0.0, 'panda_joint2': -0.54, 'panda_joint3': 0.0,
+        #     'panda_joint4': -2.6, 'panda_joint5': -0.30, 'panda_joint6': 2.0,
+        #     'panda_joint7': 1.0, 'panda_finger_joint1': 0.02, 'panda_finger_joint2': 0.02,
+        # }
+        # positions = [0.42092164, -0.92326318, -0.33538581, -2.65185322, 1.40763901, 1.81818155, 0.58610855, 0.02, 0.02]
 
         # Enable self collisions to prevent the arm from going through the torso
         if self.task == 'arm_manipulation':
@@ -294,7 +295,7 @@ class WorldCreation:
             jname = joint_info[1].decode('UTF-8')
             if jtype is p.JOINT_REVOLUTE or jtype is p.JOINT_PRISMATIC:
                 robot_arm_joint_indices.append(i)
-                p.resetJointState(robot, i, initial_positions[jname], physicsClientId=self.id)
+                # p.resetJointState(robot, i, positions[len(robot_arm_joint_indices)-1], physicsClientId=self.id)
                 print("ADDING JOINT %s, %d" % (jname, i))
         robot_arm_joint_indices = robot_arm_joint_indices[:7]  # last joints are arm
 
