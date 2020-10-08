@@ -303,7 +303,7 @@ class WorldCreation:
             self.print_joint_info(robot, show_fixed=True)
 
         # Initialize and position
-        p.resetBasePositionAndOrientation(robot, [-0.3, -0.7, 0.75], [0, 0, 0, 1], physicsClientId=self.id)
+        p.resetBasePositionAndOrientation(robot, [-0.35, -0.6, 0.75], [0, 0, 0, 1], physicsClientId=self.id)
 
         # Grab and enforce robot arm joint limits
         lower_limits, upper_limits = self.enforce_joint_limits(robot)

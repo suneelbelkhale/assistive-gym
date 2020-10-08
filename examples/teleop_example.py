@@ -31,6 +31,11 @@ while True:
     env.render()
 
     keys = p.getKeyboardEvents()
+    if ord('r') in keys and keys[ord('r')] & p.KEY_IS_DOWN:
+        print("Resetting from keyboard!")
+        observation = env.reset()
+        position, orientation = p.getLinkState(env.robot, 8, computeForwardKinematics=True)[:2]
+
     for key, action in keys_actions.items():
         if key in keys and keys[key] & p.KEY_IS_DOWN:
             position += action
@@ -47,7 +52,8 @@ while True:
     joint_positions, joint_velocities, joint_torques = env.get_motor_joint_states(env.robot)
     joint_positions = np.array(joint_positions)[:7]
 
-    print(position, orientation)
+    # print(position, orientation)
+    # print(joint_positions)
 
     # Set joint action to be the error between current and target joint positions
     joint_action = (target_joint_positions - joint_positions) * 10

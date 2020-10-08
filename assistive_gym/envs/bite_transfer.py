@@ -6,19 +6,37 @@ import matplotlib.pyplot as plt
 
 from .env import AssistiveEnv
 
-class BiteTransferEnv(AssistiveEnv):
 
-    def __init__(self, robot_type='panda', human_control=False, width=256, height=256):
+class BiteTransferEnv(AssistiveEnv):
+    VALID_FOODS = ['strawberry', 'carrot', 'canteloupe', 'celery']
+    FOOD_BASE_SCALE = [0.01, 0.02, 0.01, 0.01]
+    FOOD_OFFSET = (np.array([0, -0.005, 0]), np.zeros(3), np.zeros(3), np.zeros(3))
+
+    def __init__(self, robot_type='panda', human_control=False, width=256, height=256,
+                 foods=tuple(VALID_FOODS),
+                 foods_scale_range=((1.0, 1.5), (1.0, 1.5), (1.0, 1.4), (1.0, 1.5)), debug=True):
         super(BiteTransferEnv, self).__init__(robot_type=robot_type, task='bite_transfer', human_control=human_control,
                                               frame_skip=10, time_step=0.01, action_robot_len=7,
                                               action_human_len=(4 if human_control else 0), obs_robot_len=25,
                                               obs_human_len=(23 if human_control else 0))
-        self.foods = ['strawberry.urdf', 'carrot.urdf']
+        idxs = []
+        for i in range(len(foods)):
+            assert foods[i] in self.VALID_FOODS
+            idxs.append(self.VALID_FOODS.index(foods[i]))
+            assert len(foods_scale_range[i]) == 2
+        self.foods = list(foods)
+        self.foods_scale_range = list(foods_scale_range)
+        self.food_offsets = [self.FOOD_OFFSET[i] for i in idxs]
+        self.food_base_scale = [self.FOOD_BASE_SCALE[i] for i in idxs]
+
+        print("BiteTransferEnv using foods:", self.foods)
 
         self.fov = 60
         self.near = 0.005
         self.far = 0.1
         self.yaw, self.pitch, self.roll = 60, 0, 0
+
+        self.debug = debug
 
         self.camdist = 0.05
         self.img_width, self.img_height = width, height
@@ -30,13 +48,13 @@ class BiteTransferEnv(AssistiveEnv):
         self.im2_d = self.ax[1, 1].imshow(np.zeros((width, height, 4)), cmap='gray', vmin=0, vmax=1)
 
     # TODO
-    def step(self, action, ret_images=False):
+    def step(self, action, ret_images=False, ret_dict=False):
         # actually step in the environment
         self.take_step(action, robot_arm='right', gains=self.config('robot_gains'), forces=self.config('robot_forces'),
                        human_gains=0.0005)
 
         end_effector_velocity = np.linalg.norm(p.getBaseVelocity(self.drop_fork, physicsClientId=self.id)[0])
-        obs = self._get_obs(ret_images=ret_images)
+        obs = self._get_obs(ret_images=ret_images, ret_dict=ret_dict)
 
         reward = 0
 
@@ -57,39 +75,96 @@ class BiteTransferEnv(AssistiveEnv):
         food_force_on_mouth = 0.
         for c in p.getContactPoints(bodyA=self.robot, bodyB=self.mouth, physicsClientId=self.id):
             robot_force_on_mouth += c[9]
-        for c in p.getContactPoints(bodyA=self.drop_fork, bodyB=self.human, physicsClientId=self.id):
+        for c in p.getContactPoints(bodyA=self.drop_fork, bodyB=self.mouth, physicsClientId=self.id):
             fork_force_on_mouth += c[9]
-        for c in p.getContactPoints(bodyA=self.foodItem, bodyB=self.human, physicsClientId=self.id):
+        for c in p.getContactPoints(bodyA=self.food_item, bodyB=self.mouth, physicsClientId=self.id):
             food_force_on_mouth += c[9]
         return [robot_force_on_mouth, fork_force_on_mouth, food_force_on_mouth]
 
-    def _get_obs(self, forces=None, ret_images=False):
+    def _get_obs(self, forces=None, ret_images=False, ret_dict=False):
         fork_pos, fork_orient = p.getBasePositionAndOrientation(self.drop_fork, physicsClientId=self.id)
-        food_pos, food_orient = p.getBasePositionAndOrientation(self.foodItem, physicsClientId=self.id)
+        food_pos, food_orient = p.getBasePositionAndOrientation(self.food_item, physicsClientId=self.id)
         robot_right_joint_states = p.getJointStates(self.robot, jointIndices=self.robot_right_arm_joint_indices,
                                                     physicsClientId=self.id)
         robot_right_joint_positions = np.array([x[0] for x in robot_right_joint_states])
         robot_pos, robot_orient = p.getBasePositionAndOrientation(self.robot, physicsClientId=self.id)
+        ee_pos, ee_orient = p.getLinkState(self.robot, 8, physicsClientId=self.id)[0:2]
+        # print(ee_pos, fork_pos, food_pos)
+        _, ee_inverse = p.invertTransform(position=[0,0,0], orientation=ee_orient)
+        offset = np.array(food_pos) - np.array(ee_pos)
+        offset = p.rotateVector(ee_inverse, offset)
 
         # get forces if not precomputed
         if forces is None:
             forces = self.get_total_force()  # robot, fork, food
 
-        robot_obs = np.concatenate([
-            robot_right_joint_positions,
-            fork_pos,  # 3D drop fork position
-            fork_orient,  # drop fork orientation
-            food_pos,  # 3D food position
-            food_orient,  # food orientation (absolute)
-            self.food_orient_quat,  # food orientation (relative to fork)
-            [self.food_type],  # food type
-            self.mouth_pos,  # 3D mouth center pos (target)
-            self.mouth_orient,  # mouth orientation (absolute)
-            forces]).ravel().astype(np.float32)
+        # RAY TRACE
 
-        if ret_images:
-            return robot_obs, self.depth_opengl1, self.depth_opengl2
-        return robot_obs
+        rayStarts = [np.array(food_pos) + 0.0 * np.array(self.batch_ray_offsets[i]) for i in range(4)]
+        rayEnds = [np.array(rayStarts[i]) + np.array(self.batch_ray_offsets[i]) for i in range(4)]
+
+        output = p.rayTestBatch(rayStarts, rayEnds, physicsClientId=self.id)
+
+        for i in range(len(self.ray_markers)):
+            # p.resetBasePositionAndOrientation(self.ray_markers_end[i], rayEnds[i], [0,0,0,1], physicsClientId=self.id)
+            # p.resetBasePositionAndOrientation(self.ray_markers[i], output[i][3], [0,0,0,1], physicsClientId=self.id)
+            if output[i][0] != -1 and output[i][0] != self.mouth:
+                # cast again
+                rayStarts[i] = np.array(output[i][3]) + 0.05 * np.array(
+                    self.batch_ray_offsets[i])  # start at the old intersection + 5% collision margin
+
+        output2 = p.rayTestBatch(rayStarts, rayEnds, physicsClientId=self.id)
+
+        insidemouth = all([output2[i][0] == self.mouth for i in range(len(output2))])
+        margin = np.array([0] * len(output2))
+        if insidemouth:
+            margin = np.array([output2[i][2] for i in range(len(output2))])
+
+        if self.debug:
+            print(insidemouth, [output2[i][0] for i in range(len(output2))], margin)
+            print(forces)
+
+        if ret_dict:
+            d = {
+                "joint_positions": robot_right_joint_positions,
+                "fork_position": fork_pos,
+                "fork_orientation": fork_orient,
+                "food_position": food_pos,
+                "food_orientation": food_orient,
+                "food_type": [self.food_type],
+                "mouth_position": self.mouth_pos,
+                "mouth_orientation": self.mouth_orient,
+                "mouth_forces": forces,
+                "is_inside_mouth": [int(insidemouth)],
+                "mouth_margin": margin,
+                "ee_to_food_offset": offset,
+                "ee_position": ee_pos,
+                "ee_orientation": ee_orient,
+            }
+            if ret_images:
+                d["depth1"] = self.depth_opengl1
+                d["depth2"] = self.depth_opengl2
+            return d
+        else:
+            robot_obs = np.concatenate([
+                robot_right_joint_positions,
+                fork_pos,  # 3D drop fork position
+                fork_orient,  # drop fork orientation
+                food_pos,  # 3D food position
+                food_orient,  # food orientation (absolute)
+                self.food_orient_quat,  # food orientation (relative to fork)
+                [self.food_type],  # food type
+                self.mouth_pos,  # 3D mouth center pos (target)
+                self.mouth_orient,  # mouth orientation (absolute)
+                forces,  # forces exerted on mouth from each non mouth object [robot, fork, food item]
+                [int(insidemouth)],  # is food inside mouth
+                margin,  # margin to mouth walls from inside
+                offset  # offset from end effector to mouth (in ee coord frame)
+            ]).ravel().astype(np.float32)
+
+            if ret_images:
+                return robot_obs, self.depth_opengl1, self.depth_opengl2
+            return robot_obs
 
     def render(self, mode='human'):
         pg = self.gui
@@ -101,7 +176,7 @@ class BiteTransferEnv(AssistiveEnv):
             plt.show(block=False)
             self.fig.canvas.draw()
 
-    def reset(self, ret_images=False):
+    def reset(self, ret_images=False, ret_dict=False):
         self.setup_timing()
         self.task_success = 0
         self.human, self.wheelchair, self.robot, self.robot_lower_limits, self.robot_upper_limits, self.human_lower_limits, self.human_upper_limits, self.robot_right_arm_joint_indices, self.robot_left_arm_joint_indices, self.gender = self.world_creation.create_new_world(
@@ -143,7 +218,7 @@ class BiteTransferEnv(AssistiveEnv):
                                 physicsClientId=self.id)
 
         # MOUTH SIM
-        self.mouth_pos = [-0, -0.15, 1.4]
+        self.mouth_pos = [-0, -0.15, 1.2]
         self.mouth_orient = p.getQuaternionFromEuler([np.pi / 2, np.pi / 2, -np.pi / 2], physicsClientId=self.id)
 
         self.mouth = p.loadURDF(os.path.join(self.world_creation.directory, 'mouth', 'hole.urdf'), useFixedBase=True,
@@ -151,6 +226,23 @@ class BiteTransferEnv(AssistiveEnv):
                                 baseOrientation=self.mouth_orient,
                                 flags=p.URDF_USE_SELF_COLLISION, physicsClientId=self.id)
 
+        sph_vis = p.createVisualShape(shapeType=p.GEOM_SPHERE, radius=0.005, rgbaColor=[0, 1, 0, 1],
+                                      physicsClientId=self.id)
+        self.mouth_center_vis = p.createMultiBody(baseMass=0.0, baseCollisionShapeIndex=-1,
+                                                  baseVisualShapeIndex=sph_vis, basePosition=self.mouth_pos,
+                                                  useMaximalCoordinates=False, physicsClientId=self.id)
+
+        self.batch_ray_offsets = [[0.08, 0, 0], [-0.08, 0, 0], [0, 0, 0.05], [0, 0, -0.05]]
+        self.ray_markers = [
+            p.createMultiBody(baseMass=0.0, baseCollisionShapeIndex=-1, baseVisualShapeIndex=sph_vis,
+                              basePosition=self.mouth_pos, useMaximalCoordinates=False, physicsClientId=self.id)
+            for i in range(4)
+        ]
+        self.ray_markers_end = [
+            p.createMultiBody(baseMass=0.0, baseCollisionShapeIndex=-1, baseVisualShapeIndex=sph_vis,
+                              basePosition=self.mouth_pos, useMaximalCoordinates=False, physicsClientId=self.id)
+            for i in range(4)
+        ]
         # SCALE = 0.1
         # self.mouthVisualShapeId = p.createVisualShape(shapeType=p.GEOM_MESH,
         #                                               fileName=os.path.join(self.world_creation.directory, 'mouth', 'hole2.obj'),
@@ -191,8 +283,11 @@ class BiteTransferEnv(AssistiveEnv):
             #                              max_ik_random_restarts=40, random_restart_threshold=0.01, step_sim=True,
             #                              check_env_collisions=True)
             #
-            positions = [0.42092164, -0.92326318, -0.33538581, -2.65185322, 1.40763901, 1.81818155, 0.58610855, 0, 0,
-                         0.02, 0.02]  # 11
+            # positions = [0.42092164, -0.92326318, -0.33538581, -2.65185322, 1.40763901, 1.81818155, 0.58610855, 0, 0,
+            #              0.02, 0.02]  # 11
+            # positions = [0.4721324, -0.87257245, -0.2123101, -2.44757844, 1.47352227, 1.90545005, 0.75139663]
+            positions = [0.44594466, -0.58616227, -0.78082232, -2.59866731, 1.15649738, 1.54176148, 0.15145287]
+
             for idx in range(len(positions)):
                 p.resetJointState(self.robot, idx, positions[idx])
 
@@ -207,27 +302,40 @@ class BiteTransferEnv(AssistiveEnv):
 
         # LOAD FOOD ITEM
         self.food_type = np.random.randint(0, len(self.foods), dtype=int)
-        print("LOADING food file: %s" % self.foods[self.food_type])
-        self.childZ = [-0.004, -0.0065]
-        self.foodOrientEul = np.random.rand(3) * 2 * np.pi
-        self.food_orient_quat = p.getQuaternionFromEuler(self.foodOrientEul, physicsClientId=self.id)
-        self.foodItem = p.loadURDF(
-            os.path.join(self.world_creation.directory, 'food_items', self.foods[self.food_type]),
-            basePosition=[0, 0, 0],
-            baseOrientation=p.getQuaternionFromEuler([0, 0, 0],
-                                                     physicsClientId=self.id),
-            physicsClientId=self.id)
+        self.food_scale = np.random.uniform(self.foods_scale_range[self.food_type][0], self.foods_scale_range[self.food_type][1])
+        print("LOADING food file: %s with scale %.2f" % (self.foods[self.food_type], self.food_scale))
+        self.child_offset = self.food_scale * self.food_offsets[self.food_type]  # [-0.004, -0.0065]
+        self.food_orient_eul = np.random.rand(3) * 2 * np.pi
+        self.food_orient_quat = p.getQuaternionFromEuler(self.food_orient_eul, physicsClientId=self.id)
+
+        mesh_scale = np.array([self.food_base_scale[self.food_type]] * 3) * self.food_scale
+        food_visual = p.createVisualShape(shapeType=p.GEOM_MESH,
+                                         fileName=os.path.join(self.world_creation.directory, 'food_items',
+                                                               self.foods[self.food_type] + ".obj"),
+                                         rgbaColor=[1.0, 1.0, 1.0, 1.0],
+                                         meshScale=mesh_scale, physicsClientId=self.id)
+
+        food_collision = p.createCollisionShape(shapeType=p.GEOM_MESH,
+                                               fileName=os.path.join(self.world_creation.directory, 'food_items',
+                                                                     self.foods[self.food_type] + "_vhacd.obj"),
+                                               meshScale=mesh_scale, physicsClientId=self.id)
+        self.food_item = p.createMultiBody(baseMass=0.012, baseCollisionShapeIndex=food_collision,
+                                           baseVisualShapeIndex=food_visual, basePosition=[0, 0, 0],
+                                           useMaximalCoordinates=False,
+                                           physicsClientId=self.id)
+        p.changeVisualShape(self.food_item, -1, textureUniqueId=p.loadTexture(os.path.join(self.world_creation.directory, 'food_items',
+                                                                                           self.foods[self.food_type] + ".png")))
 
         # Disable collisions between the tool and food item
         for ti in list(range(p.getNumJoints(self.drop_fork, physicsClientId=self.id))) + [-1]:
-            for tj in list(range(p.getNumJoints(self.foodItem, physicsClientId=self.id))) + [-1]:
-                p.setCollisionFilterPair(self.drop_fork, self.foodItem, ti, tj, False, physicsClientId=self.id)
+            for tj in list(range(p.getNumJoints(self.food_item, physicsClientId=self.id))) + [-1]:
+                p.setCollisionFilterPair(self.drop_fork, self.food_item, ti, tj, False, physicsClientId=self.id)
 
         # Create constraint that keeps the food item in the tool
         constraint = p.createConstraint(self.drop_fork, -1,
-                                        self.foodItem, -1, p.JOINT_FIXED, jointAxis=[0, 0, 0],
+                                        self.food_item, -1, p.JOINT_FIXED, jointAxis=[0, 0, 0],
                                         parentFramePosition=[0, 0, -0.025],
-                                        childFramePosition=[0, 0, self.childZ[self.food_type]],
+                                        childFramePosition=self.child_offset,
                                         parentFrameOrientation=self.food_orient_quat,
                                         childFrameOrientation=[0, 0, 0, 1],
                                         physicsClientId=self.id)
@@ -251,9 +359,11 @@ class BiteTransferEnv(AssistiveEnv):
         for i in range(10):
             p.stepSimulation()
 
-        ee_pos, ee_orient = p.getBasePositionAndOrientation(self.foodItem)
-        self.viewMat1 = p.computeViewMatrixFromYawPitchRoll(ee_pos, self.camdist, self.yaw, self.pitch, self.roll, 2, self.id)
-        self.viewMat2 = p.computeViewMatrixFromYawPitchRoll(ee_pos, self.camdist, -self.yaw, self.pitch, self.roll, 2, self.id)
+        ee_pos, ee_orient = p.getBasePositionAndOrientation(self.food_item)
+        self.viewMat1 = p.computeViewMatrixFromYawPitchRoll(ee_pos, self.camdist, self.yaw, self.pitch, self.roll, 2,
+                                                            self.id)
+        self.viewMat2 = p.computeViewMatrixFromYawPitchRoll(ee_pos, self.camdist, -self.yaw, self.pitch, self.roll, 2,
+                                                            self.id)
         self.projMat = p.computeProjectionMatrixFOV(self.fov, self.img_width / self.img_height, self.near, self.far)
 
         images1 = p.getCameraImage(self.img_width,
@@ -286,7 +396,7 @@ class BiteTransferEnv(AssistiveEnv):
             self.im2_d.set_data(self.depth_opengl2)
             self.fig.canvas.draw()
 
-        return self._get_obs(ret_images=ret_images)
+        return self._get_obs(ret_images=ret_images, ret_dict=ret_dict)
 
     def _reset_robot(self, joint_position):
         self.state = {}
