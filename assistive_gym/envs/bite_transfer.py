@@ -100,25 +100,26 @@ class BiteTransferEnv(AssistiveEnv):
 
         # RAY TRACE
 
-        rayStarts = [np.array(food_pos) + 0.0 * np.array(self.batch_ray_offsets[i]) for i in range(4)]
-        rayEnds = [np.array(rayStarts[i]) + np.array(self.batch_ray_offsets[i]) for i in range(4)]
+        # START OUTSIDE OF MOUTH
+        rayEnds = [np.array(food_pos) + 0.0 * np.array(self.batch_ray_offsets[i]) for i in range(4)]
+        rayStarts = [np.array(rayEnds[i]) + np.array(self.batch_ray_offsets[i]) for i in range(4)]
 
-        output = p.rayTestBatch(rayStarts, rayEnds, physicsClientId=self.id)
-
-        for i in range(len(self.ray_markers)):
-            # p.resetBasePositionAndOrientation(self.ray_markers_end[i], rayEnds[i], [0,0,0,1], physicsClientId=self.id)
-            # p.resetBasePositionAndOrientation(self.ray_markers[i], output[i][3], [0,0,0,1], physicsClientId=self.id)
-            if output[i][0] != -1 and output[i][0] != self.mouth:
-                # cast again
-                rayStarts[i] = np.array(output[i][3]) + 0.05 * np.array(
-                    self.batch_ray_offsets[i])  # start at the old intersection + 5% collision margin
+        # output = p.rayTestBatch(rayStarts, rayEnds, physicsClientId=self.id)
+        #
+        # for i in range(len(self.ray_markers)):
+        #     # p.resetBasePositionAndOrientation(self.ray_markers_end[i], rayEnds[i], [0,0,0,1], physicsClientId=self.id)
+        #     # p.resetBasePositionAndOrientation(self.ray_markers[i], output[i][3], [0,0,0,1], physicsClientId=self.id)
+        #     if output[i][0] != -1 and output[i][0] != self.mouth:
+        #         # cast again
+        #         rayStarts[i] = np.array(output[i][3]) + 0.05 * np.array(
+        #             self.batch_ray_offsets[i])  # start at the old intersection + 5% collision margin
 
         output2 = p.rayTestBatch(rayStarts, rayEnds, physicsClientId=self.id)
 
         insidemouth = all([output2[i][0] == self.mouth for i in range(len(output2))])
         margin = np.array([0] * len(output2))
         if insidemouth:
-            margin = np.array([output2[i][2] for i in range(len(output2))])
+            margin = np.array([1. - output2[i][2] for i in range(len(output2))])  # margin will be 1 when we are maximally far in this direction
 
         if self.debug:
             print(insidemouth, [output2[i][0] for i in range(len(output2))], margin)
