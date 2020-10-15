@@ -2,9 +2,11 @@ import gym, assistive_gym
 import pybullet as p
 import numpy as np
 
-env = gym.make('BiteTransferPanda-v0')
+from assistive_gym.envs.bite_transfer import BiteTransferEnv
+
+env = BiteTransferEnv()  # gym.make('BiteTransferPanda-v0')
 env.render()
-observation = env.reset()
+observation = env.reset(ret_dict=True)
 env.world_creation.print_joint_info(env.robot)
 keys_actions = {
     p.B3G_LEFT_ARROW: np.array([-0.01, 0, 0]),
@@ -24,6 +26,9 @@ keys_orient_actions = {
     ord('\''): np.array([-0.01, 0, 0]),
 }
 
+sph_vis = p.createVisualShape(shapeType=p.GEOM_SPHERE, radius=0.005, rgbaColor=[0, 1, 0, 1],
+                              physicsClientId=env.id)
+
 # Get the position and orientation of the end effector
 position, orientation = p.getLinkState(env.robot, 8, computeForwardKinematics=True)[:2]
 
@@ -33,7 +38,7 @@ while True:
     keys = p.getKeyboardEvents()
     if ord('r') in keys and keys[ord('r')] & p.KEY_IS_DOWN:
         print("Resetting from keyboard!")
-        observation = env.reset()
+        observation = env.reset(ret_dict=True)
         position, orientation = p.getLinkState(env.robot, 8, computeForwardKinematics=True)[:2]
 
     for key, action in keys_actions.items():
@@ -57,5 +62,5 @@ while True:
 
     # Set joint action to be the error between current and target joint positions
     joint_action = (target_joint_positions - joint_positions) * 10
-    observation, reward, done, info = env.step(joint_action)
+    observation, reward, done, info = env.step(joint_action, ret_dict=True)
 

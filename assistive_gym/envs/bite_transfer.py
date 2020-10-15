@@ -88,11 +88,13 @@ class BiteTransferEnv(AssistiveEnv):
                                                     physicsClientId=self.id)
         robot_right_joint_positions = np.array([x[0] for x in robot_right_joint_states])
         robot_pos, robot_orient = p.getBasePositionAndOrientation(self.robot, physicsClientId=self.id)
-        ee_pos, ee_orient = p.getLinkState(self.robot, 8, physicsClientId=self.id)[0:2]
+        ee_pos, ee_orient = p.getLinkState(self.robot, 8, physicsClientId=self.id)[4:6]  # we want offset from link frames
         # print(ee_pos, fork_pos, food_pos)
         _, ee_inverse = p.invertTransform(position=[0,0,0], orientation=ee_orient)
         offset = np.array(food_pos) - np.array(ee_pos)
         offset = p.rotateVector(ee_inverse, offset)
+
+        velocity, angular_velocity = p.getBaseVelocity(self.drop_fork, physicsClientId=self.id)
 
         # get forces if not precomputed
         if forces is None:
@@ -132,6 +134,7 @@ class BiteTransferEnv(AssistiveEnv):
                 "fork_orientation": fork_orient,
                 "food_position": food_pos,
                 "food_orientation": food_orient,
+                "food_size": [self.food_scale],
                 "food_type": [self.food_type],
                 "mouth_position": self.mouth_pos,
                 "mouth_orientation": self.mouth_orient,
@@ -141,6 +144,8 @@ class BiteTransferEnv(AssistiveEnv):
                 "ee_to_food_offset": offset,
                 "ee_position": ee_pos,
                 "ee_orientation": ee_orient,
+                "ee_velocity": velocity,
+                "ee_angular_velocity": angular_velocity,
             }
             if ret_images:
                 d["depth1"] = self.depth_opengl1
@@ -395,6 +400,7 @@ class BiteTransferEnv(AssistiveEnv):
             self.im2.set_data(self.rgb_opengl2)
             self.im1_d.set_data(self.depth_opengl1)
             self.im2_d.set_data(self.depth_opengl2)
+            print(np.min(self.depth_opengl1), np.max(self.depth_opengl1))
             self.fig.canvas.draw()
 
         return self._get_obs(ret_images=ret_images, ret_dict=ret_dict)
